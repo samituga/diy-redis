@@ -1,0 +1,26 @@
+[package]
+name = "diy-redis"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "client"
+path = "src/bin/client.rs"
+
+[dependencies]
+anyhow = "1.0.95"
+bytes = "1.9.0"
+memchr = "2.7.4"
+mini-redis = "0.4.1"
+oneshot = "0.1.8"
+thiserror = "2.0.11"
+tokio = { version = "1.43.0", features = ["rt", "rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+claims = "0.8.0"
+criterion = { version = "0.5", default-features = false, features = ["plotters", "cargo_bench_support", "html_reports"] }
+proptest = "1.6.0"
