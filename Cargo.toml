@@ -27,4 +27,8 @@ proptest = "1.6.0"
 
 [[bench]]
 harness = false
-name = "parse_frame"
+name = "parse_integer_frame"
+
+[[bench]]
+harness = false
+name = "parse_simple_string_frame"
