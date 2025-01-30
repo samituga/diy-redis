@@ -1,4 +1,3 @@
-use crate::frame::Frame::Simple;
 use anyhow::{anyhow, Context};
 use bytes::{Buf, Bytes};
 use memchr::memchr;
@@ -28,16 +27,25 @@ impl Frame {
     fn simple(mut buf: Cursor<&[u8]>) -> Result<Frame, Error> {
         let line = read_line(&mut buf)?.to_vec();
 
-        let str = String::from_utf8(line).context("protocol error; invalid frame format")?;
+        let str =
+            String::from_utf8(line).context("protocol error; invalid simple string format")?;
 
-        Ok(Simple(str))
+        Ok(Frame::Simple(str))
+    }
+
+    fn error(mut buf: Cursor<&[u8]>) -> Result<Frame, Error> {
+        let line = read_line(&mut buf)?.to_vec();
+
+        let str = String::from_utf8(line).context("protocol error; invalid simple error format")?;
+
+        Ok(Frame::Error(str))
     }
 }
 
 pub fn parse(mut buf: Cursor<&[u8]>) -> Result<Frame, Error> {
     match get_u8(&mut buf)? {
         b'+' => Frame::simple(buf),
-        b'-' => todo!("Simple Errors"),
+        b'-' => Frame::error(buf),
         b':' => todo!("Integers"),
         b'$' => todo!("Bulk Strings"),
         b'*' => todo!("Arrays"),
@@ -193,6 +201,43 @@ mod tests {
         assert_err!(&frame);
     }
 
+    #[test]
+    fn error_frame_valid() {
+        // Arrange
+        let buf = b"-ERR unknown command 'asdf'\r\n";
+        let buf = Cursor::new(buf.as_slice());
+
+        // Act
+        let frame = parse(buf);
+
+        // Assert
+        assert_ok!(&frame);
+        if let Ok(Frame::Error(content)) = frame {
+            assert_eq!(content, "ERR unknown command 'asdf'");
+        } else {
+            panic!("Expected Frame::Error variant");
+        }
+    }
+
+    #[test]
+    fn error_frame_cursor_not_in_start_valid() {
+        // Arrange
+        let buf = b"prefix-Error message\r\nsuffix";
+        let mut buf = Cursor::new(buf.as_slice());
+        buf.set_position(6);
+
+        // Act
+        let frame = parse(buf);
+
+        // Assert
+        assert_ok!(&frame);
+        if let Ok(Frame::Error(content)) = frame {
+            assert_eq!(content, "Error message");
+        } else {
+            panic!("Expected Frame::Error variant");
+        }
+    }
+
     // ------------------------------------------------
     // ------------------ Strategies ------------------
     // ------------------------------------------------
@@ -211,7 +256,8 @@ mod tests {
         })
     }
 
-    fn valid_line_with_prefix_and_suffix_strategy() -> impl Strategy<Value = (Vec<u8>, Vec<u8>, Vec<u8>)> {
+    fn valid_line_with_prefix_and_suffix_strategy(
+    ) -> impl Strategy<Value = (Vec<u8>, Vec<u8>, Vec<u8>)> {
         (
             proptest::collection::vec(any::<u8>(), 0..43),
             valid_simple_string_strategy(),
