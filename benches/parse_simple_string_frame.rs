@@ -9,9 +9,8 @@ fn bench_read_line(c: &mut Criterion) {
             let data = Bytes::from_static(
                 b"+Lorem ipsum dolor sit amet, consectetur adipiscing elit. \r\n",
             );
-            let mut cursor = Cursor::new(data.as_ref());
-            cursor.set_position(0);
-            let result = parse(cursor).unwrap();
+            let mut buff = Cursor::new(data.as_ref());
+            let result = parse(&mut buff).unwrap();
             black_box(result);
         })
     });
@@ -24,9 +23,8 @@ fn bench_read_line(c: &mut Criterion) {
                 .chain(Bytes::from(vec![b'a'; 10_000]))
                 .chain(Bytes::from_static(b"\r\n"));
             let data = data.copy_to_bytes(data.remaining());
-            let mut cursor = Cursor::new(data.chunk());
-            cursor.set_position(0);
-            let result = parse(cursor).unwrap();
+            let mut buff = Cursor::new(data.chunk());
+            let result = parse(&mut buff).unwrap();
             black_box(result);
         })
     });
@@ -35,8 +33,7 @@ fn bench_read_line(c: &mut Criterion) {
         b.iter(|| {
             let data = Bytes::from_static(b"+Partial line without CRLF");
             let mut cursor = Cursor::new(data.as_ref());
-            cursor.set_position(0);
-            let _ = parse(cursor);
+            let _ = parse(&mut cursor);
             black_box(());
         })
     });

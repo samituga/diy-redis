@@ -48,10 +48,10 @@ impl Frame {
     }
 }
 
-pub fn parse(mut buf: Cursor<&[u8]>) -> Result<Frame> {
-    let frame_type = get_u8(&mut buf)?;
-    let line = read_line(&mut buf)?;
-    match frame_type {
+pub fn parse(buff: &mut Cursor<&[u8]>) -> Result<Frame> {
+    let first_byte = get_u8(buff)?;
+    let line = read_line(buff)?;
+    match first_byte {
         b'+' => Frame::simple(line),
         b'-' => Frame::error(line),
         b':' => Frame::integer(line),
@@ -61,19 +61,19 @@ pub fn parse(mut buf: Cursor<&[u8]>) -> Result<Frame> {
     }
 }
 
-fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8> {
-    if !src.has_remaining() {
+fn get_u8(buff: &mut Cursor<&[u8]>) -> Result<u8> {
+    if !buff.has_remaining() {
         return Err(Error::Incomplete);
     }
 
-    Ok(src.get_u8())
+    Ok(buff.get_u8())
 }
 
-fn read_line<'a>(src: &mut Cursor<&'a [u8]>) -> Result<&'a [u8]> {
-    let start = src.position() as usize;
-    let buffer = *src.get_ref();
+fn read_line<'a>(buff: &mut Cursor<&'a [u8]>) -> Result<&'a [u8]> {
+    let start = buff.position() as usize;
+    let buff_ref = *buff.get_ref();
 
-    let Some(cr_pos) = memchr(b'\r', &buffer[start..]) else {
+    let Some(cr_pos) = memchr(b'\r', &buff_ref[start..]) else {
         return Err(Error::UnexpectedError(anyhow!(
             "protocol error; \\r\\n not found."
         )));
@@ -81,25 +81,25 @@ fn read_line<'a>(src: &mut Cursor<&'a [u8]>) -> Result<&'a [u8]> {
 
     let expected_lf_pos = start + cr_pos + 1;
 
-    if memchr(b'\n', &buffer[start..expected_lf_pos]).is_some() {
+    if memchr(b'\n', &buff_ref[start..expected_lf_pos]).is_some() {
         return Err(Error::UnexpectedError(anyhow!(
             "protocol error; \\n found in wrong position."
         )));
     }
 
-    if buffer.len() <= expected_lf_pos {
+    if buff_ref.len() <= expected_lf_pos {
         return Err(Error::Incomplete);
     }
 
-    if buffer[expected_lf_pos] != b'\n' {
+    if buff_ref[expected_lf_pos] != b'\n' {
         return Err(Error::UnexpectedError(anyhow!(
             "protocol error; \\n not found after \\r."
         )));
     }
 
-    src.set_position(expected_lf_pos as u64);
+    buff.set_position(expected_lf_pos as u64);
 
-    Ok(&buffer[start..expected_lf_pos - 1])
+    Ok(&buff_ref[start..expected_lf_pos - 1])
 }
 
 #[cfg(test)]
@@ -113,11 +113,11 @@ mod tests {
     #[test]
     fn read_line_crlf_order_invalid() {
         // Arrange
-        let buf = b"unimportant\n\r";
-        let mut buf = Cursor::new(buf.as_slice());
+        let buff = b"unimportant\n\r";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let line = read_line(&mut buf);
+        let line = read_line(&mut buff);
 
         // Assert
         assert_err!(&line);
@@ -127,11 +127,11 @@ mod tests {
     #[test]
     fn read_line_no_cr_at_all_invalid() {
         // Arrange
-        let buf = b"unimportant";
-        let mut buf = Cursor::new(buf.as_slice());
+        let buff = b"unimportant";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let line = read_line(&mut buf);
+        let line = read_line(&mut buff);
 
         // Assert
         assert_err!(&line);
@@ -141,11 +141,11 @@ mod tests {
     #[test]
     fn read_line_missing_lf_invalid() {
         // Arrange
-        let buf = b"unimportant\r";
-        let mut buf = Cursor::new(buf.as_slice());
+        let buff = b"unimportant\r";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let line = read_line(&mut buf);
+        let line = read_line(&mut buff);
 
         // Assert
         assert_err!(&line);
@@ -155,11 +155,11 @@ mod tests {
     #[test]
     fn read_line_content_contains_cr_invalid() {
         // Arrange
-        let buf = b"unimportant\runimportant\r\n";
-        let mut buf = Cursor::new(buf.as_slice());
+        let buff = b"unimportant\runimportant\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let line = read_line(&mut buf);
+        let line = read_line(&mut buff);
 
         // Assert
         assert_err!(&line);
@@ -169,11 +169,11 @@ mod tests {
     #[test]
     fn read_line_content_contains_lf_invalid() {
         // Arrange
-        let buf = b"unimportant\nunimportant\r\n";
-        let mut buf = Cursor::new(buf.as_slice());
+        let buff = b"unimportant\nunimportant\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let line = read_line(&mut buf);
+        let line = read_line(&mut buff);
 
         // Assert
         assert_err!(&line);
@@ -183,11 +183,11 @@ mod tests {
     #[test]
     fn parse_empty_buf_invalid() {
         // Arrange
-        let buf = b"";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b"";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_err!(&frame);
@@ -197,11 +197,11 @@ mod tests {
     #[test]
     fn parse_unsupported_frame_type_invalid() {
         // Arrange
-        let buf = b"!content\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b"!content\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_err!(&frame);
@@ -211,11 +211,11 @@ mod tests {
     #[test]
     fn parse_simple_string_frame_valid() {
         // Arrange
-        let buf = b"+Hello World\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b"+Hello World\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_ok!(&frame);
@@ -229,11 +229,11 @@ mod tests {
     #[test]
     fn parse_simple_string_empty_valid() {
         // Arrange
-        let buf = b"+\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b"+\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_ok!(&frame);
@@ -247,11 +247,11 @@ mod tests {
     #[test]
     fn parse_simple_error_frame_valid() {
         // Arrange
-        let buf = b"-ERR unknown command 'asdf'\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b"-ERR unknown command 'asdf'\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_ok!(&frame);
@@ -265,11 +265,11 @@ mod tests {
     #[test]
     fn parse_integer_frame_valid() {
         // Arrange
-        let buf = b":123\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b":123\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_ok!(&frame);
@@ -283,11 +283,11 @@ mod tests {
     #[test]
     fn parse_integer_frame_with_leading_zeros() {
         // Arrange
-        let buf = b":000123\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b":000123\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_ok!(&frame);
@@ -301,11 +301,11 @@ mod tests {
     #[test]
     fn parse_integer_frame_zero_valid() {
         // Arrange
-        let buf = b":0\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b":0\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_ok!(&frame);
@@ -319,11 +319,11 @@ mod tests {
     #[test]
     fn parse_integer_frame_negative_zero_valid() {
         // Arrange
-        let buf = b":-0\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b":-0\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_ok!(&frame);
@@ -337,11 +337,11 @@ mod tests {
     #[test]
     fn parse_integer_frame_with_positive_signal_valid() {
         // Arrange
-        let buf = b":+123\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b":+123\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_ok!(&frame);
@@ -355,11 +355,11 @@ mod tests {
     #[test]
     fn parse_integer_frame_negative_valid() {
         // Arrange
-        let buf = b":-123\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b":-123\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_ok!(&frame);
@@ -373,11 +373,11 @@ mod tests {
     #[test]
     fn parse_integer_frame_max_valid() {
         // Arrange
-        let buf = b":9223372036854775807\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b":9223372036854775807\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_ok!(&frame);
@@ -391,11 +391,11 @@ mod tests {
     #[test]
     fn parse_integer_frame_min_valid() {
         // Arrange
-        let buf = b":-9223372036854775808\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b":-9223372036854775808\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_ok!(&frame);
@@ -409,11 +409,11 @@ mod tests {
     #[test]
     fn parse_integer_frame_invalid() {
         // Arrange
-        let buf = b":12a3\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b":12a3\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_err!(&frame);
@@ -423,11 +423,11 @@ mod tests {
     fn parse_integer_frame_large_invalid() {
         // Arrange
         // i64::MAX + 1
-        let buf = b":9223372036854775808\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b":9223372036854775808\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_err!(&frame);
@@ -436,11 +436,11 @@ mod tests {
     #[test]
     fn parse_integer_frame_empty_invalid() {
         // Arrange
-        let buf = b":\r\n";
-        let buf = Cursor::new(buf.as_slice());
+        let buff = b":\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
 
         // Act
-        let frame = parse(buf);
+        let frame = parse(&mut buff);
 
         // Assert
         assert_err!(&frame);

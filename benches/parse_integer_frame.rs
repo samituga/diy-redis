@@ -7,9 +7,8 @@ fn bench_parse_integer(c: &mut Criterion) {
     c.bench_function("parse_integer", |b| {
         b.iter(|| {
             let data = Bytes::from_static(b":12345\r\n");
-            let mut cursor = Cursor::new(data.as_ref());
-            cursor.set_position(0);
-            let result = parse(cursor).unwrap();
+            let mut buff = Cursor::new(data.as_ref());
+            let result = parse(&mut buff).unwrap();
             black_box(result);
         })
     });
@@ -19,9 +18,8 @@ fn bench_parse_integer(c: &mut Criterion) {
     group.bench_function("parse_large_integer", |b| {
         b.iter(|| {
             let data = Bytes::from_static(b":9223372036854775807\r\n");
-            let mut cursor = Cursor::new(data.as_ref());
-            cursor.set_position(0);
-            let result = parse(cursor).unwrap();
+            let mut buff = Cursor::new(data.as_ref());
+            let result = parse(&mut buff).unwrap();
             black_box(result);
         })
     });
@@ -29,9 +27,8 @@ fn bench_parse_integer(c: &mut Criterion) {
     group.bench_function("parse_negative_integer", |b| {
         b.iter(|| {
             let data = Bytes::from_static(b":-98765\r\n");
-            let mut cursor = Cursor::new(data.as_ref());
-            cursor.set_position(0);
-            let result = parse(cursor).unwrap();
+            let mut buff = Cursor::new(data.as_ref());
+            let result = parse(&mut buff).unwrap();
             black_box(result);
         })
     });
@@ -39,9 +36,8 @@ fn bench_parse_integer(c: &mut Criterion) {
     group.bench_function("parse_invalid_integer", |b| {
         b.iter(|| {
             let data = Bytes::from_static(b":12a3\r\n");
-            let mut cursor = Cursor::new(data.as_ref());
-            cursor.set_position(0);
-            let _ = parse(cursor);
+            let mut buff = Cursor::new(data.as_ref());
+            let _ = parse(&mut buff);
             black_box(());
         })
     });
@@ -49,9 +45,8 @@ fn bench_parse_integer(c: &mut Criterion) {
     group.bench_function("parse_overflowing_integer", |b| {
         b.iter(|| {
             let data = Bytes::from_static(b":9999999999999999999999999999\r\n");
-            let mut cursor = Cursor::new(data.as_ref());
-            cursor.set_position(0);
-            let _ = parse(cursor);
+            let mut buff = Cursor::new(data.as_ref());
+            let _ = parse(&mut buff);
             black_box(());
         })
     });
