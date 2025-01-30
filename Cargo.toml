@@ -13,6 +13,7 @@ path = "src/bin/client.rs"
 
 [dependencies]
 anyhow = "1.0.95"
+btoi = "0.4.3"
 bytes = "1.9.0"
 memchr = "2.7.4"
 mini-redis = "0.4.1"

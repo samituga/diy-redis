@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context};
+use btoi::btoi;
 use bytes::{Buf, Bytes};
 use memchr::memchr;
 use std::io::Cursor;
@@ -41,11 +42,9 @@ impl Frame {
     }
 
     fn integer(line: &[u8]) -> Result<Self> {
-        let s = std::str::from_utf8(line).context("protocol error; invalid integer format")?;
-
-        s.parse::<i64>()
-            .map(Self::Integer)
-            .map_err(|_| Error::UnexpectedError(anyhow!("protocol error; invalid integer")))
+        btoi::<i64>(line)
+            .map(Frame::Integer)
+            .map_err(|_| Error::UnexpectedError(anyhow!("protocol error; invalid integer format")))
     }
 }
 
