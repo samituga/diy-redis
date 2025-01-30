@@ -3,6 +3,8 @@ use bytes::{Buf, Bytes};
 use memchr::memchr;
 use std::io::Cursor;
 
+pub type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Stream ended early")]
@@ -24,30 +26,30 @@ pub enum Frame {
 }
 
 impl Frame {
-    fn simple(line: &[u8]) -> Result<Frame, Error> {
+    fn simple(line: &[u8]) -> std::result::Result<Self, Error> {
         let str = String::from_utf8(line.to_vec())
             .context("protocol error; invalid simple string format")?;
 
-        Ok(Frame::Simple(str))
+        Ok(Self::Simple(str))
     }
 
-    fn error(line: &[u8]) -> Result<Frame, Error> {
+    fn error(line: &[u8]) -> Result<Self> {
         let str = String::from_utf8(line.to_vec())
             .context("protocol error; invalid simple error format")?;
 
-        Ok(Frame::Error(str))
+        Ok(Self::Error(str))
     }
 
-    fn integer(line: &[u8]) -> Result<Frame, Error> {
+    fn integer(line: &[u8]) -> Result<Self> {
         let s = std::str::from_utf8(line).context("protocol error; invalid integer format")?;
 
         s.parse::<i64>()
-            .map(Frame::Integer)
+            .map(Self::Integer)
             .map_err(|_| Error::UnexpectedError(anyhow!("protocol error; invalid integer")))
     }
 }
 
-pub fn parse(mut buf: Cursor<&[u8]>) -> Result<Frame, Error> {
+pub fn parse(mut buf: Cursor<&[u8]>) -> Result<Frame> {
     let frame_type = get_u8(&mut buf)?;
     let line = read_line(&mut buf)?;
     match frame_type {
@@ -60,7 +62,7 @@ pub fn parse(mut buf: Cursor<&[u8]>) -> Result<Frame, Error> {
     }
 }
 
-fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, Error> {
+fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8> {
     if !src.has_remaining() {
         return Err(Error::Incomplete);
     }
@@ -68,7 +70,7 @@ fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, Error> {
     Ok(src.get_u8())
 }
 
-fn read_line<'a>(src: &mut Cursor<&'a [u8]>) -> Result<&'a [u8], Error> {
+fn read_line<'a>(src: &mut Cursor<&'a [u8]>) -> Result<&'a [u8]> {
     let start = src.position() as usize;
     let buffer = *src.get_ref();
 
@@ -80,15 +82,19 @@ fn read_line<'a>(src: &mut Cursor<&'a [u8]>) -> Result<&'a [u8], Error> {
 
     let expected_lf_pos = start + cr_pos + 1;
 
-    if buffer.len() <= expected_lf_pos || buffer[expected_lf_pos] != b'\n' {
-        return Err(Error::UnexpectedError(anyhow!(
-            "protocol error; \\n not found or in wrong position."
-        )));
-    }
-
     if memchr(b'\n', &buffer[start..expected_lf_pos]).is_some() {
         return Err(Error::UnexpectedError(anyhow!(
             "protocol error; \\n found in wrong position."
+        )));
+    }
+
+    if buffer.len() <= expected_lf_pos {
+        return Err(Error::Incomplete);
+    }
+
+    if buffer[expected_lf_pos] != b'\n' {
+        return Err(Error::UnexpectedError(anyhow!(
+            "protocol error; \\n not found after \\r."
         )));
     }
 
@@ -99,70 +105,11 @@ fn read_line<'a>(src: &mut Cursor<&'a [u8]>) -> Result<&'a [u8], Error> {
 
 #[cfg(test)]
 mod tests {
-    use crate::frame::{parse, read_line, Frame};
+    use crate::frame::{parse, read_line, Error, Frame};
     use claims::{assert_err, assert_ok};
     use proptest::prelude::{any, Strategy};
     use proptest::proptest;
     use std::io::Cursor;
-
-    proptest! {
-
-        #[test]
-        fn read_line_valid_from_any_position((prefix, content, suffix) in valid_line_with_prefix_and_suffix_strategy()) {
-            // Arrange
-            // [prefix][content]\r\n[suffix]
-            let mut data = prefix.clone();
-            data.extend_from_slice(&content);
-            data.extend_from_slice(&suffix);
-
-            let mut cursor = Cursor::new(data.as_slice());
-            cursor.set_position(prefix.len() as u64);
-
-            // Act
-            let line = read_line(&mut cursor);
-
-            // Assert
-            assert_ok!(&line);
-            let line_wo_crlf = &content[..content.len() - 2];
-            assert_eq!(line.unwrap(), line_wo_crlf);
-        }
-
-        #[test]
-        fn simple_string_frame_valid(frame_bytes in valid_simple_string_strategy()) {
-            // Arrange
-            let line = frame_bytes.as_slice();
-
-            // Act
-            let frame = Frame::simple(line);
-
-            // Assert
-            assert_ok!(&frame);
-            if let Ok(Frame::Simple(content)) = frame {
-                let expected_content = String::from_utf8(frame_bytes.to_vec()).unwrap();
-                assert_eq!(content, expected_content);
-            } else {
-                panic!("Expected Frame::Simple variant")
-            }
-        }
-        
-        #[test]
-        fn simple_error_frame_valid(frame_bytes in valid_simple_error_strategy()) {
-            // Arrange
-            let line = frame_bytes.as_slice();
-
-            // Act
-            let frame = Frame::error(line);
-
-            // Assert
-            assert_ok!(&frame);
-            if let Ok(Frame::Error(content)) = frame {
-                let expected_content = String::from_utf8(frame_bytes.to_vec()).unwrap();
-                assert_eq!(content, expected_content);
-            } else {
-                panic!("Expected Frame::Simple variant")
-            }
-        }
-    }
 
     #[test]
     fn read_line_crlf_order_invalid() {
@@ -175,6 +122,35 @@ mod tests {
 
         // Assert
         assert_err!(&line);
+        assert!(matches!(line, Err(Error::UnexpectedError(_))));
+    }
+
+    #[test]
+    fn read_line_no_cr_at_all_invalid() {
+        // Arrange
+        let buf = b"unimportant";
+        let mut buf = Cursor::new(buf.as_slice());
+
+        // Act
+        let line = read_line(&mut buf);
+
+        // Assert
+        assert_err!(&line);
+        assert!(matches!(line, Err(Error::UnexpectedError(_))));
+    }
+
+    #[test]
+    fn read_line_missing_lf_invalid() {
+        // Arrange
+        let buf = b"unimportant\r";
+        let mut buf = Cursor::new(buf.as_slice());
+
+        // Act
+        let line = read_line(&mut buf);
+
+        // Assert
+        assert_err!(&line);
+        assert!(matches!(line, Err(Error::Incomplete)));
     }
 
     #[test]
@@ -188,6 +164,7 @@ mod tests {
 
         // Assert
         assert_err!(&line);
+        assert!(matches!(line, Err(Error::UnexpectedError(_))));
     }
 
     #[test]
@@ -201,6 +178,35 @@ mod tests {
 
         // Assert
         assert_err!(&line);
+        assert!(matches!(line, Err(Error::UnexpectedError(_))));
+    }
+
+    #[test]
+    fn parse_empty_buf_invalid() {
+        // Arrange
+        let buf = b"";
+        let buf = Cursor::new(buf.as_slice());
+
+        // Act
+        let frame = parse(buf);
+
+        // Assert
+        assert_err!(&frame);
+        assert!(matches!(frame, Err(Error::Incomplete)));
+    }
+
+    #[test]
+    fn parse_unsupported_frame_type_invalid() {
+        // Arrange
+        let buf = b"!content\r\n";
+        let buf = Cursor::new(buf.as_slice());
+
+        // Act
+        let frame = parse(buf);
+
+        // Assert
+        assert_err!(&frame);
+        assert!(matches!(frame, Err(Error::UnsupportedFrameType)));
     }
 
     #[test]
@@ -220,7 +226,25 @@ mod tests {
             panic!("Expected Frame::Simple variant");
         }
     }
-    
+
+    #[test]
+    fn parse_simple_string_empty_valid() {
+        // Arrange
+        let buf = b"+\r\n";
+        let buf = Cursor::new(buf.as_slice());
+
+        // Act
+        let frame = parse(buf);
+
+        // Assert
+        assert_ok!(&frame);
+        if let Ok(Frame::Simple(content)) = frame {
+            assert_eq!(content, "");
+        } else {
+            panic!("Expected Frame::Simple variant");
+        }
+    }
+
     #[test]
     fn parse_simple_error_frame_valid() {
         // Arrange
@@ -252,6 +276,60 @@ mod tests {
         assert_ok!(&frame);
         if let Ok(Frame::Integer(content)) = frame {
             assert_eq!(content, 123);
+        } else {
+            panic!("Expected Frame::Error variant");
+        }
+    }
+
+    #[test]
+    fn parse_integer_frame_with_leading_zeros() {
+        // Arrange
+        let buf = b":000123\r\n";
+        let buf = Cursor::new(buf.as_slice());
+
+        // Act
+        let frame = parse(buf);
+
+        // Assert
+        assert_ok!(&frame);
+        if let Ok(Frame::Integer(content)) = frame {
+            assert_eq!(content, 123);
+        } else {
+            panic!("Expected Frame::Integer variant");
+        }
+    }
+
+    #[test]
+    fn parse_integer_frame_zero_valid() {
+        // Arrange
+        let buf = b":0\r\n";
+        let buf = Cursor::new(buf.as_slice());
+
+        // Act
+        let frame = parse(buf);
+
+        // Assert
+        assert_ok!(&frame);
+        if let Ok(Frame::Integer(content)) = frame {
+            assert_eq!(content, 0);
+        } else {
+            panic!("Expected Frame::Error variant");
+        }
+    }
+
+    #[test]
+    fn parse_integer_frame_negative_zero_valid() {
+        // Arrange
+        let buf = b":-0\r\n";
+        let buf = Cursor::new(buf.as_slice());
+
+        // Act
+        let frame = parse(buf);
+
+        // Assert
+        assert_ok!(&frame);
+        if let Ok(Frame::Integer(content)) = frame {
+            assert_eq!(content, 0);
         } else {
             panic!("Expected Frame::Error variant");
         }
@@ -356,6 +434,98 @@ mod tests {
         assert_err!(&frame);
     }
 
+    #[test]
+    fn parse_integer_frame_empty_invalid() {
+        // Arrange
+        let buf = b":\r\n";
+        let buf = Cursor::new(buf.as_slice());
+
+        // Act
+        let frame = parse(buf);
+
+        // Assert
+        assert_err!(&frame);
+        assert!(matches!(frame, Err(Error::UnexpectedError(_))));
+    }
+
+    proptest! {
+        #[test]
+        fn read_line_valid_from_any_position((prefix, content, suffix) in valid_line_with_prefix_and_suffix_strategy()) {
+            // Arrange
+            // [prefix][content]\r\n[suffix]
+            let mut data = prefix.clone();
+            data.extend_from_slice(&content);
+            data.extend_from_slice(&suffix);
+
+            let mut cursor = Cursor::new(data.as_slice());
+            cursor.set_position(prefix.len() as u64);
+
+            // Act
+            let line = read_line(&mut cursor);
+
+            // Assert
+            assert_ok!(&line);
+            let line_wo_crlf = &content[..content.len() - 2];
+            assert_eq!(line.unwrap(), line_wo_crlf);
+        }
+
+        #[test]
+        fn simple_string_frame_valid(frame_bytes in valid_simple_string_strategy()) {
+            // Arrange
+            let line = frame_bytes.as_slice();
+
+            // Act
+            let frame = Frame::simple(line);
+
+            // Assert
+            assert_ok!(&frame);
+            if let Ok(Frame::Simple(content)) = frame {
+                let expected_content = String::from_utf8(frame_bytes.to_vec()).unwrap();
+                assert_eq!(content, expected_content);
+            } else {
+                panic!("Expected Frame::Simple variant")
+            }
+        }
+
+        #[test]
+        fn simple_error_frame_valid(frame_bytes in valid_simple_error_strategy()) {
+            // Arrange
+            let line = frame_bytes.as_slice();
+
+            // Act
+            let frame = Frame::error(line);
+
+            // Assert
+            assert_ok!(&frame);
+            if let Ok(Frame::Error(content)) = frame {
+                let expected_content = String::from_utf8(frame_bytes.to_vec()).unwrap();
+                assert_eq!(content, expected_content);
+            } else {
+                panic!("Expected Frame::Error variant")
+            }
+        }
+
+        #[test]
+        fn integer_frame_valid(frame_bytes in valid_integer_content_strategy()) {
+            // Arrange
+            let line = frame_bytes.as_slice();
+
+            // Act
+            let frame = Frame::integer(line);
+            // Assert
+            assert_ok!(&frame);
+            if let Ok(Frame::Integer(content)) = frame {
+                let expected_content = std::str::from_utf8(line)
+                .unwrap()
+                .parse::<i64>()
+                .unwrap();
+                assert_eq!(content, expected_content);
+            } else {
+                panic!("Expected Frame::Integer variant");
+            }
+        }
+    }
+
     // ------------------------------------------------
     // ------------------ Strategies ------------------
     // ------------------------------------------------
@@ -392,5 +562,9 @@ mod tests {
             valid_string_content_strategy(),
             proptest::collection::vec(any::<u8>(), 0..51),
         )
+    }
+
+    fn valid_integer_content_strategy() -> impl Strategy<Value = Vec<u8>> {
+        any::<i64>().prop_map(|num| num.to_string().into_bytes())
     }
 }
