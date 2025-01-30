@@ -1,7 +1,6 @@
-use tokio::net::TcpStream;
 
 pub struct Connection {
-    stream: TcpStream,
+    // stream: TcpStream,
 }
 
 // impl Connection {

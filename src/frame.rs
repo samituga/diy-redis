@@ -34,7 +34,7 @@ impl Frame {
     }
 }
 
-pub(crate) fn parse(mut buf: Cursor<&[u8]>) -> Result<Frame, Error> {
+pub fn parse(mut buf: Cursor<&[u8]>) -> Result<Frame, Error> {
     match get_u8(&mut buf)? {
         b'+' => Frame::simple(buf),
         b'-' => todo!("Simple Errors"),
@@ -53,7 +53,7 @@ fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, Error> {
     Ok(src.get_u8())
 }
 
-pub(crate) fn read_line<'a>(src: &mut Cursor<&'a [u8]>) -> Result<&'a [u8], Error> {
+fn read_line<'a>(src: &mut Cursor<&'a [u8]>) -> Result<&'a [u8], Error> {
     let start = src.position() as usize;
     let buffer = *src.get_ref();
 
@@ -71,7 +71,7 @@ pub(crate) fn read_line<'a>(src: &mut Cursor<&'a [u8]>) -> Result<&'a [u8], Erro
         )));
     }
 
-    if let Some(_) = memchr(b'\n', &buffer[start..expected_lf_pos]) {
+    if memchr(b'\n', &buffer[start..expected_lf_pos]).is_some() {
         return Err(Error::UnexpectedError(anyhow!(
             "protocol error; \\n found in wrong position."
         )));
@@ -118,13 +118,12 @@ mod tests {
             data.extend_from_slice(&suffix);
 
             let mut cursor = Cursor::new(data.as_slice());
-            cursor.set_position((prefix.len()) as u64);
+            cursor.set_position(prefix.len() as u64);
 
             // Act
             let frame = parse(cursor);
 
             // Assert
-
             assert_ok!(&frame);
 
             if let Ok(Frame::Simple(content)) = frame {

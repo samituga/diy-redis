@@ -1,3 +1,3 @@
-mod connection;
+pub mod connection;
 pub mod db;
-mod frame;
+pub mod frame;
