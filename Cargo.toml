@@ -19,7 +19,7 @@ memchr = "2.7.4"
 mini-redis = "0.4.1"
 oneshot = "0.1.8"
 thiserror = "2.0.11"
-tokio = { version = "1.43.0", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1.43.0", features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
 claims = "0.8.0"
