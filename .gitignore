@@ -1,1 +1,5 @@
 /target
+/coverage
+lcov.info
+lcov_correct.info
+.DS_Store
