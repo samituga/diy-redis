@@ -50,11 +50,19 @@ impl Frame {
 
 pub fn parse(buff: &mut Cursor<&[u8]>) -> Result<Frame> {
     let first_byte = get_u8(buff)?;
-    let line = read_line(buff)?;
     match first_byte {
-        b'+' => Frame::simple(line),
-        b'-' => Frame::error(line),
-        b':' => Frame::integer(line),
+        b'+' => {
+            let line = read_line(buff)?;
+            Frame::simple(line)
+        },
+        b'-' => {
+            let line = read_line(buff)?;
+            Frame::error(line)
+        },
+        b':' => {
+            let line = read_line(buff)?;
+            Frame::integer(line)
+        },
         b'$' => todo!("Bulk Strings"),
         b'*' => todo!("Arrays"),
         _ => Err(Error::UnsupportedFrameType),
@@ -97,7 +105,7 @@ fn read_line<'a>(buff: &mut Cursor<&'a [u8]>) -> Result<&'a [u8]> {
         )));
     }
 
-    buff.set_position(expected_lf_pos as u64);
+    buff.set_position((expected_lf_pos + 1) as u64);
 
     Ok(&buff_ref[start..expected_lf_pos - 1])
 }
@@ -192,6 +200,44 @@ mod tests {
         // Assert
         assert_err!(&frame);
         assert!(matches!(frame, Err(Error::Incomplete)));
+    }
+
+    #[test]
+    fn parse_multiple_frames() {
+        // Arrange
+        let buff = b"+simple\r\n-error\r\n:123\r\n";
+        let mut buff = Cursor::new(buff.as_slice());
+
+        // Act
+        let string_frame = parse(&mut buff);
+        let error_frame = parse(&mut buff);
+        let integer_frame = parse(&mut buff);
+        // no more bytes to parse
+        let should_be_error = parse(&mut buff);
+
+        assert_ok!(&string_frame);
+        if let Ok(Frame::Simple(content)) = string_frame {
+            assert_eq!(content, "simple");
+        } else {
+            panic!("Expected Frame::Simple variant for first frame");
+        }
+
+        assert_ok!(&error_frame);
+        if let Ok(Frame::Error(content)) = error_frame {
+            assert_eq!(content, "error");
+        } else {
+            panic!("Expected Frame::Error variant for second frame");
+        }
+
+        assert_ok!(&integer_frame);
+        if let Ok(Frame::Integer(num)) = integer_frame {
+            assert_eq!(num, 123);
+        } else {
+            panic!("Expected Frame::Integer variant for third frame");
+        }
+
+        assert_err!(&should_be_error);
+        assert!(matches!(should_be_error, Err(Error::Incomplete)));
     }
 
     #[test]
@@ -417,6 +463,7 @@ mod tests {
 
         // Assert
         assert_err!(&frame);
+        assert!(matches!(frame, Err(Error::UnexpectedError(_))));
     }
 
     #[test]
@@ -431,6 +478,7 @@ mod tests {
 
         // Assert
         assert_err!(&frame);
+        assert!(matches!(frame, Err(Error::UnexpectedError(_))));
     }
 
     #[test]
